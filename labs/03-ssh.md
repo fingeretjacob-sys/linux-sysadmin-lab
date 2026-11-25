@@ -173,4 +173,126 @@ Identify root cause
 Apply remediation
         ↓
 Verify authentication
+
+
+## SSH Authentication Troubleshooting
+
+To practice troubleshooting SSH authentication, I intentionally changed the permissions on the `authorized_keys` file from `600` to `666`.
+
+```bash
+sudo chmod 666 /home/sshadmin/.ssh/authorized_keys
 ```
+
+This changed the permissions from:
+
+```text
+-rw-------
+```
+
+to:
+
+```text
+-rw-rw-rw-
+```
+
+The file was now writable by the owner, group, and other users.
+
+### Client-Side Investigation
+
+From the Windows SSH client, I enabled verbose logging:
+
+```powershell
+ssh -v sshadmin@192.168.50.130
+```
+
+The SSH client successfully located and offered the ED25519 private key:
+
+```text
+Offering public key: C:\Users\romot\.ssh\id_ed25519
+```
+
+However, the server rejected public-key authentication and the client fell back to password authentication.
+
+This showed that the client had located the correct private key, but the SSH server was refusing the corresponding public key.
+
+### Server-Side Investigation
+
+On the Ubuntu server, I reviewed the SSH service logs:
+
+```bash
+sudo journalctl -u ssh --since "10 minutes ago" --no-pager
+```
+
+The SSH daemon reported:
+
+```text
+Authentication refused: bad ownership or modes for file /home/sshadmin/.ssh/authorized_keys
+```
+
+### Root Cause
+
+The `authorized_keys` file had overly permissive permissions.
+
+SSH rejected the file because allowing other users to modify `authorized_keys` could allow an unauthorized user to add their own public key and gain access to the account.
+
+### Resolution
+
+I restored the file permissions:
+
+```bash
+sudo chmod 600 /home/sshadmin/.ssh/authorized_keys
+```
+
+The secure configuration was:
+
+```text
+~/.ssh           700
+authorized_keys  600
+```
+
+### Verification
+
+I reconnected from Windows using verbose SSH:
+
+```powershell
+ssh -v sshadmin@192.168.50.130
+```
+
+After restoring the permissions, public-key authentication succeeded and the remote Ubuntu shell was opened successfully.
+
+## Troubleshooting Methodology
+
+This exercise demonstrated a structured troubleshooting process:
+
+```text
+SSH authentication failure
+        ↓
+Inspect client with ssh -v
+        ↓
+Verify correct key is offered
+        ↓
+Inspect server logs with journalctl
+        ↓
+Identify insecure authorized_keys permissions
+        ↓
+Restore permissions
+        ↓
+Retest SSH authentication
+        ↓
+Successful remote login
+```
+
+## What I Learned
+
+This lab demonstrated:
+
+- How SSH operates over TCP port 22
+- The relationship between SSH clients and servers
+- Public and private SSH keys
+- The purpose of `authorized_keys`
+- The purpose of `known_hosts`
+- Secure permissions for SSH files
+- Using `ssh -v` for client-side troubleshooting
+- Using `journalctl` for server-side troubleshooting
+- How Linux file permissions can affect authentication
+- How to validate a fix by reproducing the original connection
